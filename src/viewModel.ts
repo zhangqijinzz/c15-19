@@ -1,4 +1,4 @@
-import { cloneScenario, summarizeScenario, validateDevice, validateScenarioSettings } from './domain';
+import { cloneScenario, reorderScenario, resolveActiveScenarioAfterRemoval, summarizeScenario, validateDevice, validateScenarioName, validateScenarioSettings } from './domain';
 import { findScenario, type EnergyRepository } from './repository';
 import type { EnergyDevice, EnergyDocument, EnergyScenario, Notice, ViewStatus } from './types';
 
@@ -86,10 +86,45 @@ export class EnergyLensViewModel {
   duplicateActive(): void {
     const source = this.activeScenario;
     if (!source || !this.state.document) return;
-    const id = `scenario-${Date.now()}`;
+    const id = `scenario-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const copy = cloneScenario(source, id, `${source.name} · 副本`);
     const document = { ...this.state.document, scenarios: [...this.state.document.scenarios, copy], activeScenarioId: id };
     this.persist(document, '方案已复制，现在可以修改副本');
+  }
+
+  renameScenario(id: string, name: string): void {
+    const document = this.state.document;
+    if (!document || !findScenario(document, id)) return;
+    const error = validateScenarioName(name);
+    if (error) {
+      this.setNotice({ kind: 'error', text: error });
+      return;
+    }
+    const trimmed = name.trim();
+    if (findScenario(document, id)?.name === trimmed) return;
+    const scenarios = document.scenarios.map((scenario) => scenario.id === id ? { ...scenario, name: trimmed } : scenario);
+    this.persist({ ...document, scenarios }, '方案已重命名');
+  }
+
+  removeScenario(id: string): void {
+    const document = this.state.document;
+    if (!document || !findScenario(document, id)) return;
+    if (document.scenarios.length <= 1) {
+      this.setNotice({ kind: 'info', text: '这是最后一个方案，至少保留一个' });
+      return;
+    }
+    const activeScenarioId = resolveActiveScenarioAfterRemoval(document.scenarios, id, document.activeScenarioId);
+    const scenarios = document.scenarios.filter((scenario) => scenario.id !== id);
+    const notice = activeScenarioId === document.activeScenarioId ? '方案已删除' : '方案已删除，已切换到相邻方案';
+    this.persist({ ...document, scenarios, activeScenarioId }, notice);
+  }
+
+  moveScenario(id: string, offset: -1 | 1): void {
+    const document = this.state.document;
+    if (!document) return;
+    const scenarios = reorderScenario(document.scenarios, id, offset);
+    if (scenarios === document.scenarios) return;
+    this.persist({ ...document, scenarios }, '方案顺序已更新');
   }
 
   selectScenario(id: string): void {

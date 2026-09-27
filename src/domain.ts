@@ -55,6 +55,49 @@ export function validateScenarioSettings(pricePerKwh: number, daysPerMonth: numb
   return null;
 }
 
+export function validateScenarioName(name: string): string | null {
+  if (!name.trim()) return '方案名称不能为空';
+  return null;
+}
+
+/**
+ * 列表展示名：同名方案按列表顺序追加（2）（3）…，保证任何数据
+ * （包括历史遗留的同名副本）在列表里都不会长得一模一样。
+ * 存储的原始名字不变，仅用于展示。
+ */
+export function scenarioDisplayNames(scenarios: EnergyScenario[]): Map<string, string> {
+  const seen = new Map<string, number>();
+  const displayNames = new Map<string, string>();
+  for (const scenario of scenarios) {
+    const count = seen.get(scenario.name) ?? 0;
+    seen.set(scenario.name, count + 1);
+    displayNames.set(scenario.id, count === 0 ? scenario.name : `${scenario.name}（${count + 1}）`);
+  }
+  return displayNames;
+}
+
+/** 把方案在列表中向上/下移动一位；越界或不存在时原样返回（同一引用）。 */
+export function reorderScenario(scenarios: EnergyScenario[], id: string, offset: number): EnergyScenario[] {
+  const from = scenarios.findIndex((scenario) => scenario.id === id);
+  const to = from + offset;
+  if (from < 0 || to < 0 || to >= scenarios.length) return scenarios;
+  const next = scenarios.slice();
+  [next[from], next[to]] = [next[to], next[from]];
+  return next;
+}
+
+/**
+ * 删除方案后解析仍有效的活动方案：删的不是当前方案则保持不变；
+ * 删的是当前方案则落到相邻方案上（优先后一个，删的是末尾则落到前一个）。
+ */
+export function resolveActiveScenarioAfterRemoval(scenarios: EnergyScenario[], removedId: string, activeId: string): string {
+  const remaining = scenarios.filter((scenario) => scenario.id !== removedId);
+  if (remaining.length === 0) return activeId;
+  if (activeId !== removedId && remaining.some((scenario) => scenario.id === activeId)) return activeId;
+  const removedIndex = scenarios.findIndex((scenario) => scenario.id === removedId);
+  return remaining[Math.min(Math.max(removedIndex, 0), remaining.length - 1)].id;
+}
+
 export function formatNumber(value: number, digits = 2): string {
   return value.toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits });
 }
