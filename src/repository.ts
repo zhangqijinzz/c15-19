@@ -1,4 +1,4 @@
-import { exampleScenario } from './domain';
+import { exampleScenario, normalizeScenarioNames } from './domain';
 import { readDocument, writeDocument } from './services/storageService';
 import type { EnergyDocument, EnergyScenario } from './types';
 
@@ -13,8 +13,12 @@ export class LocalEnergyRepository implements EnergyRepository {
     if (!saved || saved.scenarios.length === 0) {
       return { version: 1, scenarios: [exampleScenario], activeScenarioId: exampleScenario.id };
     }
-    const activeExists = saved.scenarios.some((scenario) => scenario.id === saved.activeScenarioId);
-    return activeExists ? saved : { ...saved, activeScenarioId: saved.scenarios[0].id };
+    const scenarios = normalizeScenarioNames(saved.scenarios);
+    const activeExists = scenarios.some((scenario) => scenario.id === saved.activeScenarioId);
+    const repaired: EnergyDocument = { ...saved, scenarios, activeScenarioId: activeExists ? saved.activeScenarioId : scenarios[0].id };
+    const changed = repaired.activeScenarioId !== saved.activeScenarioId || scenarios.some((scenario, index) => scenario !== saved.scenarios[index]);
+    if (changed) writeDocument(repaired);
+    return repaired;
   }
 
   save(document: EnergyDocument): void {

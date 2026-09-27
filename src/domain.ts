@@ -62,3 +62,36 @@ export function formatNumber(value: number, digits = 2): string {
 export function cloneScenario(source: EnergyScenario, id: string, name: string): EnergyScenario {
   return { ...source, id, name, createdAt: new Date().toISOString(), devices: source.devices.map((device) => ({ ...device, id: `${id}-${device.id}` })) };
 }
+
+export const FALLBACK_SCENARIO_NAME = '未命名方案';
+const COPY_SUFFIX = ' · 副本';
+const COPY_SUFFIX_PATTERN = /(?: · 副本(?: \d+)?)+$/;
+
+/** 在 taken 中找到一个不冲突的名字：原名可用就用原名，否则依次尝试「名字 2」「名字 3」… */
+export function dedupeScenarioName(desired: string, taken: ReadonlySet<string>): string {
+  const base = desired.trim() || FALLBACK_SCENARIO_NAME;
+  if (!taken.has(base)) return base;
+  let index = 2;
+  let candidate = `${base} ${index}`;
+  while (taken.has(candidate)) {
+    index += 1;
+    candidate = `${base} ${index}`;
+  }
+  return candidate;
+}
+
+/** 为 source 的副本生成名字：先剥掉已有的「· 副本」尾巴，避免后缀一路叠加 */
+export function nextCopyName(sourceName: string, taken: ReadonlySet<string>): string {
+  const base = sourceName.trim().replace(COPY_SUFFIX_PATTERN, '') || FALLBACK_SCENARIO_NAME;
+  return dedupeScenarioName(`${base}${COPY_SUFFIX}`, taken);
+}
+
+/** 修正列表中的重名（含旧数据里一模一样的副本名），保持原有顺序，靠后的加序号 */
+export function normalizeScenarioNames(scenarios: EnergyScenario[]): EnergyScenario[] {
+  const taken = new Set<string>();
+  return scenarios.map((scenario) => {
+    const name = dedupeScenarioName(scenario.name, taken);
+    taken.add(name);
+    return name === scenario.name ? scenario : { ...scenario, name };
+  });
+}

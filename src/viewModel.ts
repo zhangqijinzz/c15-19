@@ -1,4 +1,4 @@
-import { cloneScenario, summarizeScenario, validateDevice, validateScenarioSettings } from './domain';
+import { cloneScenario, nextCopyName, summarizeScenario, validateDevice, validateScenarioSettings } from './domain';
 import { findScenario, type EnergyRepository } from './repository';
 import type { EnergyDevice, EnergyDocument, EnergyScenario, Notice, ViewStatus } from './types';
 
@@ -71,7 +71,7 @@ export class EnergyLensViewModel {
     this.commit((current) => ({ ...current, devices: current.devices.filter((item) => item.id !== deviceId) }), '设备已移除');
   }
 
-  updateSettings(patch: Partial<Pick<EnergyScenario, 'name' | 'pricePerKwh' | 'daysPerMonth'>>): void {
+  updateSettings(patch: Partial<Pick<EnergyScenario, 'pricePerKwh' | 'daysPerMonth'>>): void {
     const scenario = this.activeScenario;
     if (!scenario) return;
     const next = { ...scenario, ...patch };
@@ -80,14 +80,61 @@ export class EnergyLensViewModel {
       this.setNotice({ kind: 'error', text: error });
       return;
     }
-    this.commit((current) => ({ ...current, name: next.name.trim() || '未命名方案', pricePerKwh: next.pricePerKwh, daysPerMonth: next.daysPerMonth }), '计费参数已更新');
+    this.commit((current) => ({ ...current, pricePerKwh: next.pricePerKwh, daysPerMonth: next.daysPerMonth }), '计费参数已更新');
+  }
+
+  renameScenario(id: string, rawName: string): boolean {
+    const document = this.state.document;
+    if (!document) return false;
+    const scenario = findScenario(document, id);
+    if (!scenario) return false;
+    const name = rawName.trim();
+    if (!name) {
+      this.setNotice({ kind: 'error', text: '方案名称不能为空' });
+      return false;
+    }
+    if (name === scenario.name) return true;
+    if (document.scenarios.some((item) => item.id !== id && item.name === name)) {
+      this.setNotice({ kind: 'error', text: `已有名为「${name}」的方案，请换一个名字` });
+      return false;
+    }
+    this.persist({ ...document, scenarios: document.scenarios.map((item) => item.id === id ? { ...item, name } : item) }, '方案已重命名');
+    return true;
+  }
+
+  removeScenario(id: string): void {
+    const document = this.state.document;
+    if (!document) return;
+    if (document.scenarios.length <= 1) {
+      this.setNotice({ kind: 'info', text: '最后一个方案不能删除' });
+      return;
+    }
+    const index = document.scenarios.findIndex((scenario) => scenario.id === id);
+    if (index < 0) return;
+    const scenarios = document.scenarios.filter((scenario) => scenario.id !== id);
+    const activeScenarioId = document.activeScenarioId === id
+      ? scenarios[Math.min(index, scenarios.length - 1)].id
+      : document.activeScenarioId;
+    this.persist({ ...document, scenarios, activeScenarioId }, '方案已删除');
+  }
+
+  moveScenario(id: string, offset: -1 | 1): void {
+    const document = this.state.document;
+    if (!document) return;
+    const index = document.scenarios.findIndex((scenario) => scenario.id === id);
+    const target = index + offset;
+    if (index < 0 || target < 0 || target >= document.scenarios.length) return;
+    const scenarios = [...document.scenarios];
+    [scenarios[index], scenarios[target]] = [scenarios[target], scenarios[index]];
+    this.persist({ ...document, scenarios }, '方案顺序已更新');
   }
 
   duplicateActive(): void {
     const source = this.activeScenario;
     if (!source || !this.state.document) return;
     const id = `scenario-${Date.now()}`;
-    const copy = cloneScenario(source, id, `${source.name} · 副本`);
+    const taken = new Set(this.state.document.scenarios.map((scenario) => scenario.name));
+    const copy = cloneScenario(source, id, nextCopyName(source.name, taken));
     const document = { ...this.state.document, scenarios: [...this.state.document.scenarios, copy], activeScenarioId: id };
     this.persist(document, '方案已复制，现在可以修改副本');
   }
